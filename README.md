@@ -1,2 +1,3 @@
-# report-template
-Fork latex gost2007 template for me
+# centos-mpi
+
+Отчет по настройке кластера из узлов на CentOS7 с возможностью запуска Intel MPI.
