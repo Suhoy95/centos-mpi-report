@@ -99,17 +99,14 @@ network  --hostname={{host}}
 использовался DVD-образ CentOS7, и эти пакеты были выбраны
 при установке. Поэтому остается только провести настройку
 узлов:
-
 \begin{verbatim}
 mkdir -p /nfs # создадим общую
 vim /etc/exports # правим конфигурацию nfs-сервера
 \end{verbatim}
-
 В /etc/exports вписываем следующую строку:
 \begin{verbatim}
 /nfs 10.20.30.0/24(rw,sync,no_root_squash,no_all_squash)
 \end{verbatim}
-
 При этом:
 \begin{itemize}
   \item /home/nfs – расшариваемая директория;
@@ -119,7 +116,6 @@ vim /etc/exports # правим конфигурацию nfs-сервера
   \item no\_root\_squash – включение root привилегий;
   \item no\_all\_squash — включение пользовательской авторизации;
 \end{itemize}
-
 После чего включаем все необходимые сервисы:
 \begin{verbatim}
 systemctl enable rpcbind
@@ -134,8 +130,150 @@ systemctl start nfs-idmap
 
 \subsection{Настройка NFS-клиента}
 
-
+Со стороны клиента требуется гораздо меньше забот. Достаточно
+включить необобходимые сервисы:
+\begin{verbatim}
+systemctl enable rpcbind
+systemctl enable nfs-server
+systemctl enable nfs-lock
+systemctl enable nfs-idmap
+systemctl start rpcbind
+systemctl start nfs-server
+systemctl start nfs-lock
+systemctl start nfs-idmap
+\end{verbatim}
+И примонтировать папку с сервера:
+\begin{verbatim}
+mkdir -p /nfs
+mount -t nfs 10.20.30.41:/nfs /nfs
+\end{verbatim}
+После чего можно проверить работоспособность:
+\begin{verbatim}
+echo "Hello, NFS!" > /nfs/hello
+# на node1 должен появится файл /nfs/hello
+\end{verbatim}
+И наконец, чтобы не монтировать NFS при каждом запуске,
+подправим файл \textmd{/etc/nfs}:
+\begin{verbatim}
+# /etc/fstab
+# ...
+/dev/mapper/centos\_node2-root / xfs defaults 0 0
+UUID=827da158-cf9b-44b9-9f1f-be86ccd21d49 /boot xfs defaults 0 0
+/dev/mapper/centos\_node2-swap swap swap defaults   0 0
+10.20.30.41:/nfs /nfs nfs rw,sync,hard,intr 0 0
+\end{verbatim}
+После чего проверяем коррекность внесенных правок: 
+\begin{verbatim}
+mount -fav
+\end{verbatim}
 
 \section{Установка Intel MPI}
 
+Для установки Intel реализации MPI требуется пройти
+регистрацию на их официальном сайте\cite{intel-mpi}, после
+чего можно загрузить как коммерческую, так и бесплатную версию
+для ознакомления (что мы и сделали).
+
+Для полноценной работы с MPI нам потребуется поставить набор 
+необходимых компиляторов: gfortran/gcc/gcc-c++, а также
+сделать доступным все хосты по имени:
+\begin{verbatim}
+  # /etc/hosts
+  # ...
+  10.20.30.41 node1
+  10.20.30.42 node2
+  10.20.30.43 node3
+\end{verbatim}
+
+И так как пользоваться MPI должен обычный пользователь, мы
+должны сделать доступным SSH-доступ к каждому узлу скопировав
+публичный ключ:
+\begin{verbatim}
+  ssh-copy-id user@{node2,node3}
+\end{verbatim}
+
+Когда это сделано и архив загружен на рабочую станцию,
+можно раздать его на виртуальные узлы:
+\begin{verbatim}
+  cd /nfs # установка потребуется на всех узлах
+  wget http://192.168.127.1:8080/mpi.tgz
+  tar -xf mpi.tgz 
+\end{verbatim}
+
+  Далее достаточно запустить процесс установки, отвечая 
+на инструкции установочника (запустить на всех узлах):
+\begin{verbatim}
+  cd ./mpi
+  ./install.sh 
+\end{verbatim}
+
+Теперь, для проверки, можно попробовать запустить на всех узлах 
+какую-нибудь UNIX-программу. \textmd{hostname} для нас отлично
+подойдет, так как мы  сможем легко убедимся в правильности 
+запущенной программы:
+\begin{verbatim}
+  # Найдем скрипт, настраивающий переменные среды Intel MPI
+  find / -type f -name 'mpivars.sh'
+  
+  # Запустим это user-пользователем
+  # В последствии, можно добавить этот скрипт в /etc/.bashrc,
+  # чтобы Intel MPI окружение настраивалось при входе
+  . /opt/intel/compilers_and_libraries_2018.1.163/linux/mpi\\
+    /intel64/bin/mpivars.sh
+  
+  # тестовый запуск
+  # -ppn [число процессов на узел]
+  # -n [число процессов в общем]
+  # --hosts [список узлов через запятую]
+  mpirun -ppn 1 -n 3 \
+       -hosts 10.20.30.41,10.20.30.42,10.20.30.43 hostname
+\end{verbatim}
+
+Вывод программы (что и ожидалось):
+\begin{verbatim}
+  node1
+  node2
+  node3
+\end{verbatim}
+
+Для удобства использования, все хосты кластера задать в файле
+\textmd{/nfs/hosts} и создать алиас в \textmd{.bashrc}-файле:
+\begin{verbatim}
+  alias mpirun='mpirun -f /nfs/hosts'
+\end{verbatim}
+После чего, параметр \textmd{--hosts} можно опустить: 
+\begin{verbatim}
+  mpirun -ppn 2 -n 6 hostname  
+\end{verbatim}
+\clearpage
+
 \section{Запуск тестовой программы}
+
+Для полноценной проверки работоспособности MPI запустим
+тестовую программу, распространяемую вместе с Intel MPI
+реализацией:
+\begin{verbatim}
+cd /nfs/user
+# скопируем программу в рабочий котолог
+cp -r /opt/intel/impi/2018.1.163/test/ ./
+cd test
+
+# скомпилируем программу, написанную на C
+mpicc -o test test.c
+
+# запустим скомпилированную программу
+mpirun -ppn 2 -n 6 ./test
+\end{verbatim}
+
+Каждый узел этой программы отправляет свой номер, кол-во 
+процессов и имя узла на 0-вой узел, который в свою очередь
+производит печать поулченных данных. Таким образом
+вывод нашей программы:
+\begin{verbatim}
+Hello world: rank 0 of 6 running on node1
+Hello world: rank 1 of 6 running on node1
+Hello world: rank 2 of 6 running on node2
+Hello world: rank 3 of 6 running on node2
+Hello world: rank 4 of 6 running on node3
+Hello world: rank 5 of 6 running on node3
+\end{verbatim}
