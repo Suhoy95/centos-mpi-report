@@ -55,6 +55,87 @@ CentOS7, в которой можем произвести всю необход
 файл можно найти в приложении \ref{app:kickstart}.
 
 \clearpage
+
 \section{Генерация kickstart-файла с помощью python}
+Для установки нескольких узлов, нам потребуется создать
+копии полученного \textmd{kickstart}-файла. При этом
+данные файлы будут отличаться только именем узла и
+статическим IP-адрессом в изолированной сети. Мы можем
+создать из полученного файла Jinja-шаблон\cite{jinja2}, и
+сгенерировать полученные конфиги автоматически, в зависимости
+от номера узла:
+
+\verbatiminput{listings/generate.py}
+
+А в шаблоне заменить изменяющиеся параметры:
+
+\begin{verbatim}
+# ...
+
+network  --bootproto=static --device=eth1 --ip={{ip}} \
+           --netmask=255.255.255.0 --ipv6=auto --activate
+network  --hostname={{host}}
+
+# ...
+\end{verbatim}
+
+После чего мы можем просто раздать http-сервером эти файлы.
+И при установке дописав параметр, который запустит
+автоматическую установку:
+\begin{verbatim}
+  inst.ks=http://192.168.127.1:8080/node1.cfg
+\end{verbatim}
+
+\section{Настройка NFS}
+
+Рассмотрим настройку NFS-подсистемы, которая сделает общий
+подкаталог \textmd{/nfs} для всех узлов. Данный критерий не
+обязателен при работе с MPI, но очень упрощает разработку.
+
+\subsection{Настройка NFS-сервера}
+
+Для настройки nfs в CentOS есть пакеты \textmd{nfs-utils} и
+\textmd{nfs-utils-lib}. В процессе установки
+использовался DVD-образ CentOS7, и эти пакеты были выбраны
+при установке. Поэтому остается только провести настройку
+узлов:
+
+\begin{verbatim}
+mkdir -p /nfs # создадим общую
+vim /etc/exports # правим конфигурацию nfs-сервера
+\end{verbatim}
+
+В /etc/exports вписываем следующую строку:
+\begin{verbatim}
+/nfs 10.20.30.0/24(rw,sync,no_root_squash,no_all_squash)
+\end{verbatim}
+
+При этом:
+\begin{itemize}
+  \item /home/nfs – расшариваемая директория;
+  \item 10.20.30.40/24 – IP адрес клиента (или, как в моем случае, возможность подключения для всей подсети);
+  \item rw – разрешение на запись;
+  \item sync – синхронизация указанной директории;
+  \item no\_root\_squash – включение root привилегий;
+  \item no\_all\_squash — включение пользовательской авторизации;
+\end{itemize}
+
+После чего включаем все необходимые сервисы:
+\begin{verbatim}
+systemctl enable rpcbind
+systemctl enable nfs-server
+systemctl enable nfs-lock
+systemctl enable nfs-idmap
+systemctl start rpcbind
+systemctl start nfs-server
+systemctl start nfs-lock
+systemctl start nfs-idmap
+\end{verbatim}
+
+\subsection{Настройка NFS-клиента}
 
 
+
+\section{Установка Intel MPI}
+
+\section{Запуск тестовой программы}
